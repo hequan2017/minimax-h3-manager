@@ -327,7 +327,7 @@ $("form").addEventListener("submit",async e=>{
    model:"MiniMax-H3",content,
    resolution:$("resolution").value==="720"?"768P":"480P",
    duration:Number($("duration").value),
-   ratio:fl?"adaptive":$("aspect").value,
+   ratio:t.startsWith("fl2va_")?"adaptive":$("aspect").value,
    generation_config:{num_inference_steps:Number($("steps").value),flow_shift:12,audio_flow_shift:3.0,seed:Number($("seed").value)}
   };
   setStatus("working","正在创建任务");
