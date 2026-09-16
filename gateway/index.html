@@ -42,7 +42,7 @@ video{width:100%;border-radius:10px;background:#000;margin-top:14px}.hidden{disp
 <div id="audioRow" class="file-row full"><label>参考音频 <span class="hint">可选，用于指定声音</span></label><input id="audioFile" type="file" accept="audio/*"></div>
 <div id="videoRow" class="file-row full"><label>参考视频 <span class="hint">使用源视频音轨</span></label><input id="videoFile" type="file" accept="video/*"></div>
 <div><label>分辨率</label><select id="resolution"><option value="720" selected>720p（推荐）</option><option value="480">480p</option></select></div>
-<div><label>画面比例</label><select id="aspect"><option value="16:9" selected>16:9 横屏</option><option value="21:9">21:9 超宽屏</option><option value="4:3">4:3 横屏</option><option value="1:1">1:1 方形</option><option value="9:16">9:16 手机竖屏</option><option value="3:4">3:4 竖屏</option></select></div>
+<div><label>画面比例 <span id="aspectHint" class="hint"></span></label><select id="aspect"><option value="16:9" selected>16:9 横屏</option><option value="21:9">21:9 超宽屏</option><option value="4:3">4:3 横屏</option><option value="1:1">1:1 方形</option><option value="9:16">9:16 手机竖屏</option><option value="3:4">3:4 竖屏</option></select></div>
 <div class="full"><label>实际提交尺寸</label><input id="actualSize" readonly value="1344 × 768"><span class="hint">H3 要求宽高为 32 的倍数，因此 720p 使用官方推荐的 1344×768。</span><input id="width" type="hidden" value="1344"><input id="height" type="hidden" value="768"></div>
 <div><label>时长（秒）</label><input id="duration" type="number" min="4" max="15" step="1" value="5"><span class="hint">参照官方 H3：整数 4–15 秒，默认 5 秒。</span></div>
 <div><label>推理步数</label><input id="steps" type="number" min="1" max="100" value="50"></div>
@@ -76,7 +76,7 @@ Authorization: Bearer &lt;API_KEY&gt;</div>
 <table class="doc-table"><thead><tr><th>task</th><th>能力</th><th>输入媒体</th><th>模型字段</th></tr></thead><tbody>
 <tr><td><code>t2va</code></td><td>文生视频和同步音频</td><td>无</td><td><code>MiniMax-H3-FL2VA</code></td></tr>
 <tr><td><code>fl2va</code></td><td>首帧 / 尾帧 / 首尾帧图生视频和同步音频</td><td><code>first_frame</code>、<code>last_frame</code> 图片（可单可组合）</td><td><code>MiniMax-H3-FL2VA</code></td></tr>
-<tr><td><code>ref2va</code></td><td>图片参考生成（音频可选，用于指定声音）</td><td>参考图片，音频可搭配</td><td><code>MiniMax-H3-Ref2VA</code></td></tr>
+<tr><td><code>ref2va</code></td><td>图片参考生成（支持多张，音频可选，用于指定声音）</td><td>参考图片 1–4 张，音频可搭配</td><td><code>MiniMax-H3-Ref2VA</code></td></tr>
 <tr><td><code>ref2va</code></td><td>视频参考生成</td><td><code>input_reference</code> 视频，使用源音轨</td><td><code>MiniMax-H3-Ref2VA</code></td></tr>
 </tbody></table>
 <div class="notice" style="margin-top:14px">参考生成规则：至少需要图片或视频之一，音频不能作为唯一参考；纯图片参考为实验性功能（模型自行生成声音），搭配参考音频可指定音色。文生视频、首帧/尾帧/首尾帧图生视频、图片+音频参考均已真实生成验证。任务历史保存在服务端文件数据库（gateway_data/h3_gateway.db），生成视频落盘于 gateway_data/videos/，网关重启不丢失。</div>
@@ -86,7 +86,7 @@ Authorization: Bearer &lt;API_KEY&gt;</div>
 <tr><td><code>content</code></td><td>array / 是</td><td>多模态内容数组，至少包含一个非空文本项</td><td>见 content 项目表</td></tr>
 <tr><td><code>resolution</code></td><td>string / 是</td><td>本地已启用的分辨率档位</td><td><code>480P</code>、<code>768P</code>；2K 未启用</td></tr>
 <tr><td><code>duration</code></td><td>integer / 是</td><td>目标时长，单位秒</td><td>4–15，默认建议 5</td></tr>
-<tr><td><code>ratio</code></td><td>string / 是</td><td>文生视频不能使用 adaptive；图片/视频参考可使用 adaptive</td><td><code>21:9</code>、<code>16:9</code>、<code>4:3</code>、<code>1:1</code>、<code>3:4</code>、<code>9:16</code>、<code>adaptive</code></td></tr>
+<tr><td><code>ratio</code></td><td>string / 是</td><td>文生视频/图片参考/视频参考按所选比例出片；首尾帧图生视频由首帧图片比例决定（传 adaptive）</td><td><code>21:9</code>、<code>16:9</code>、<code>4:3</code>、<code>1:1</code>、<code>3:4</code>、<code>9:16</code>、<code>adaptive</code>（仅首尾帧模式建议）</td></tr>
 <tr><td><code>generation_config</code></td><td>object / 否</td><td>本地推理参数</td><td>省略时使用下表默认值</td></tr>
 <tr><td><code>generation_config.num_inference_steps</code></td><td>integer / 否</td><td>扩散去噪次数</td><td>基础 H3 建议 50；2 仅供冒烟测试</td></tr>
 <tr><td><code>generation_config.seed</code></td><td>integer / 否</td><td>随机种子，固定后便于复现</td><td>默认 1101</td></tr>
@@ -97,7 +97,7 @@ Authorization: Bearer &lt;API_KEY&gt;</div>
 <table class="doc-table"><thead><tr><th>type</th><th>字段</th><th>role</th><th>用途与限制</th></tr></thead><tbody>
 <tr><td><code>text</code></td><td><code>text</code></td><td>不填</td><td>必填且非空，描述主体、动作、镜头和声音</td></tr>
 <tr><td><code>image_url</code></td><td><code>image_url.url</code></td><td><code>first_frame</code></td><td>首帧图生视频；支持公网 URL 或 data:image URL；与 <code>last_frame</code> 同时提交即为首尾帧模式</td></tr>
-<tr><td><code>image_url</code></td><td><code>image_url.url</code></td><td><code>reference_image</code></td><td>Ref2VA 参考图片；可单独使用（纯图模式），搭配 reference_audio 可指定音色</td></tr>
+<tr><td><code>image_url</code></td><td><code>image_url.url</code></td><td><code>reference_image</code></td><td>Ref2VA 参考图片，可提交多张（本部署最多 4 张）实现多主体一致性；搭配 reference_audio 可指定音色</td></tr>
 <tr><td><code>audio_url</code></td><td><code>audio_url.url</code></td><td><code>reference_audio</code></td><td>Ref2VA 参考音频；支持公网 URL 或 data:audio URL</td></tr>
 <tr><td><code>video_url</code></td><td><code>video_url.url</code></td><td><code>reference_video</code></td><td>Ref2VA 参考视频；支持公网 URL 或 data:video URL，使用源音轨</td></tr>
 <tr><td><code>image_url</code></td><td><code>image_url.url</code></td><td><code>last_frame</code></td><td>尾帧图生视频；单独提交即尾帧模式；支持公网 URL 或 data:image URL</td></tr>
@@ -295,8 +295,13 @@ function updateTask(){
  $("lastImageRow").classList.toggle("show",t==="fl2va_first_last");
  $("audioRow").classList.toggle("show",t==="ref2va_image_audio");
  $("videoRow").classList.toggle("show",t==="ref2va_video");
- $("imageLabel").textContent=t==="fl2va_last"?"尾帧图片":t==="ref2va_image_audio"?"参考图片":"首帧图片";
+ $("imageLabel").textContent=t==="fl2va_last"?"尾帧图片":t==="ref2va_image_audio"?"参考图片（可多选，≤4 张）":"首帧图片";
+ $("imageFile").multiple=(t==="ref2va_image_audio");
  $("imageHint").textContent=fl?"无需上传音频；H3 会生成同步音轨。":"参考音频可选；不传时模型自行生成声音。";
+ $("aspect").disabled=fl;
+ $("aspect").style.opacity=fl?.55:1;
+ $("aspectHint").textContent=fl?"由首帧图片比例决定":"";
+ if(fl){$("actualSize").value="由首帧图片比例决定"}else{updateResolution()}
 }
 $("task").addEventListener("change",updateTask);updateTask();
 function setStatus(kind,text){$("status").className="status "+kind;$("statusText").textContent=text}
@@ -311,8 +316,9 @@ $("form").addEventListener("submit",async e=>{
   if(t==="fl2va_last"){const f=$("imageFile").files[0];if(!f)throw new Error("请选择尾帧图片");content.push({type:"image_url",image_url:{url:await dataUrl(f)},role:"last_frame"})}
   if(t==="fl2va_first_last"){const f=$("imageFile").files[0],l=$("lastImageFile").files[0];if(!f||!l)throw new Error("请同时选择首帧图片和尾帧图片");content.push({type:"image_url",image_url:{url:await dataUrl(f)},role:"first_frame"});content.push({type:"image_url",image_url:{url:await dataUrl(l)},role:"last_frame"})}
   if(t==="ref2va_image_audio"){
-   const img=$("imageFile").files[0];if(!img)throw new Error("请选择参考图片");
-   content.push({type:"image_url",image_url:{url:await dataUrl(img)},role:"reference_image"});
+   const imgs=[...$("imageFile").files];if(!imgs.length)throw new Error("请选择参考图片（可多选，最多 4 张）");
+   if(imgs.length>4)throw new Error("参考图片最多 4 张");
+   for(const f of imgs)content.push({type:"image_url",image_url:{url:await dataUrl(f)},role:"reference_image"});
    const aud=$("audioFile").files[0];
    if(aud)content.push({type:"audio_url",audio_url:{url:await dataUrl(aud)},role:"reference_audio"});
   }
@@ -321,7 +327,7 @@ $("form").addEventListener("submit",async e=>{
    model:"MiniMax-H3",content,
    resolution:$("resolution").value==="720"?"768P":"480P",
    duration:Number($("duration").value),
-   ratio:t==="t2va"?$("aspect").value:"adaptive",
+   ratio:fl?"adaptive":$("aspect").value,
    generation_config:{num_inference_steps:Number($("steps").value),flow_shift:12,audio_flow_shift:3.0,seed:Number($("seed").value)}
   };
   setStatus("working","正在创建任务");

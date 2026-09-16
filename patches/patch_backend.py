@@ -422,7 +422,291 @@ def _resolve_keyframe_frame_indices(extra: dict, image_count: int) -> list[int]:
 
 
 if __name__ == "__main__":
-    if len(sys.argv) > 1 and sys.argv[1] == "phase3":
+    if len(sys.argv) > 1 and sys.argv[1] == "phase4":
+        # Multi-image Ref2VA: the packed builder and Qwen presentation already
+        # accept N image blocks with per-image shapes/labels; only the glue
+        # layer collapsed reference images to one. Prepare every reference
+        # image, emit one <Picture i> slot per image, and build one image
+        # ref-block per image (audio block appended only when present).
+        name = "pipeline_minimax_h3.py"
+        cpath = FILES[name]
+        staged = pathlib.Path("/tmp") / (name + ".phase4out")
+        subprocess.run(
+            ["docker", "cp", HOST + ":" + cpath, str(staged)],
+            check=True,
+            shell=False,
+        )
+        text = staged.read_text()
+        edits = [
+            (
+                """        prepared_image = image
+        prepared_images: list = []
+        if task == "fl2va" and image is not None:
+            prepared_images = [item.resize((width, height), Image.Resampling.LANCZOS) for item in images]
+        elif task == "ref2va" and image is not None:
+            ref_width, ref_height = _reference_image_shape(image)
+            prepared_image = image.resize(
+                (ref_width, ref_height),
+                Image.Resampling.LANCZOS,
+            )
+""",
+                """        prepared_image = None
+        prepared_images: list = []
+        if task == "fl2va" and image is not None:
+            prepared_images = [item.resize((width, height), Image.Resampling.LANCZOS) for item in images]
+        elif task == "ref2va" and image is not None:
+            for item in images:
+                ref_width, ref_height = _reference_image_shape(item)
+                prepared_images.append(item.resize((ref_width, ref_height), Image.Resampling.LANCZOS))
+""",
+            ),
+            (
+                """            text_embeddings, text_tags = self.encode_prompt(
+                task=task,
+                prompt=prompt,
+                image=prepared_images if task == "fl2va" else prepared_image,
+                prepared_videos=prepared_videos,
+                has_ref_audio=task == "ref2va" and multi_modal_data.get("audio") is not None,
+            )
+""",
+                """            text_embeddings, text_tags = self.encode_prompt(
+                task=task,
+                prompt=prompt,
+                image=prepared_images if task in ("fl2va", "ref2va") else prepared_image,
+                prepared_videos=prepared_videos,
+                has_ref_audio=task == "ref2va" and multi_modal_data.get("audio") is not None,
+            )
+""",
+            ),
+            (
+                """                else:
+                    condition_labels = [("image", 1)] + ([("audio", 1)] if has_ref_audio else [])
+                    ids, tags = minimax_h3_ref2va_presentation(
+                        self.tokenizer,
+                        prompt=prompt,
+                        condition_labels=condition_labels,
+                        image_token_count=image_token_counts[0],
+                    )
+""",
+                """                else:
+                    condition_labels = [("image", index) for index in range(1, len(prompt_images) + 1)]
+                    if has_ref_audio:
+                        condition_labels.append(("audio", 1))
+                    ids, tags = minimax_h3_ref2va_presentation(
+                        self.tokenizer,
+                        prompt=prompt,
+                        condition_labels=condition_labels,
+                        image_token_count=image_token_counts,
+                    )
+""",
+            ),
+            (
+                """        if task == "ref2va":
+            if ref_blocks is None:
+                if visual_condition_shape is None:
+                    raise ValueError("ref2va condition metadata is missing")
+                _, ref_h, ref_w = visual_condition_shape
+                ref_blocks = [{"kind": "image", "latent_h": ref_h, "latent_w": ref_w}]
+                if ref_audio_t is not None:
+                    ref_blocks.append({"kind": "audio", "ref_audio_t": ref_audio_t})
+""",
+                """        if task == "ref2va":
+            if ref_blocks is None:
+                shapes = visual_condition_shapes
+                if shapes is None and visual_condition_shape is not None:
+                    shapes = [visual_condition_shape]
+                if not shapes:
+                    raise ValueError("ref2va condition metadata is missing")
+                ref_blocks = [
+                    {"kind": "image", "latent_h": int(shape[1]), "latent_w": int(shape[2])}
+                    for shape in shapes
+                ]
+                if ref_audio_t is not None:
+                    ref_blocks.append({"kind": "audio", "ref_audio_t": ref_audio_t})
+""",
+            ),
+        ]
+        patched_text = apply_edits(name, text, edits)
+
+        # serving layer: partition input_references into images vs real videos
+        sname = "serving_video.py"
+        scpath = FILES[sname]
+        sstaged = pathlib.Path("/tmp") / (sname + ".phase4out")
+        subprocess.run(
+            ["docker", "cp", HOST + ":" + scpath, str(sstaged)],
+            check=True,
+            shell=False,
+        )
+        stext = sstaged.read_text()
+        sold = """        if request_task == "fl2va" and isinstance(input_video, (list, tuple)) and input_video:
+            # fl2va input_references uploads are first/last keyframe images
+            # (persisted with a .mp4 suffix regardless of content), not
+            # reference videos; decode and hand them to the pipeline as an
+            # image list.
+            keyframe_images = []
+            for item in input_video:
+                try:
+                    keyframe_images.append(Image.open(str(item)).convert("RGB"))
+                except Exception:
+                    raise HTTPException(
+                        status_code=HTTPStatus.BAD_REQUEST.value,
+                        detail="fl2va input_references must be image files (first_frame/last_frame).",
+                    )
+            if len(keyframe_images) > 2:
+                raise HTTPException(
+                    status_code=HTTPStatus.BAD_REQUEST.value,
+                    detail="fl2va accepts at most two keyframe images (first_frame and last_frame).",
+                )
+            input_image = keyframe_images if len(keyframe_images) > 1 else keyframe_images[0]
+            input_video = None
+"""
+        snew = """        if request_task in ("fl2va", "ref2va") and isinstance(input_video, (list, tuple)) and input_video:
+            # keyframe/reference uploads are images persisted with a .mp4
+            # suffix; decode them by content and hand them to the pipeline as
+            # an image list. True video files keep the reference-video path.
+            keyframe_images = []
+            video_paths = []
+            for item in input_video:
+                try:
+                    keyframe_images.append(Image.open(str(item)).convert("RGB"))
+                except Exception:
+                    video_paths.append(item)
+            if keyframe_images and video_paths:
+                raise HTTPException(
+                    status_code=HTTPStatus.BAD_REQUEST.value,
+                    detail="input_references cannot mix image and video files.",
+                )
+            if keyframe_images:
+                if request_task == "fl2va" and len(keyframe_images) > 2:
+                    raise HTTPException(
+                        status_code=HTTPStatus.BAD_REQUEST.value,
+                        detail="fl2va accepts at most two keyframe images (first_frame and last_frame).",
+                    )
+                if request_task == "ref2va" and len(keyframe_images) > 4:
+                    raise HTTPException(
+                        status_code=HTTPStatus.BAD_REQUEST.value,
+                        detail="ref2va accepts at most four reference images on this deployment.",
+                    )
+                input_image = keyframe_images if len(keyframe_images) > 1 else keyframe_images[0]
+                input_video = None
+            elif request_task == "fl2va":
+                raise HTTPException(
+                    status_code=HTTPStatus.BAD_REQUEST.value,
+                    detail="fl2va input_references must be image files (first_frame/last_frame).",
+                )
+"""
+        spatched = apply_edits(sname, stext, [(sold, snew)])
+        install_file(sname, spatched, scpath)
+        print("PHASE4 COMPLETE")
+    elif len(sys.argv) > 1 and sys.argv[1] == "phase4fix":
+        # Recovery for the phase4 variable-reuse bug (serving content was
+        # installed over the pipeline file): rebuild the pipeline from the
+        # intact copy in another container, then re-apply phase4 edits.
+        # H3_PATCH_CONTAINER = broken target (e.g. minimax-h3-ref2va)
+        # H3_PATCH_SRC_CONTAINER = intact source (default minimax-h3-fl2va)
+        src_host = os.environ.get("H3_PATCH_SRC_CONTAINER", "minimax-h3-fl2va")
+        name = "pipeline_minimax_h3.py"
+        cpath = FILES[name]
+        staged = pathlib.Path("/tmp") / (name + ".phase4fixout")
+        subprocess.run(
+            ["docker", "cp", src_host + ":" + cpath, str(staged)],
+            check=True,
+            shell=False,
+        )
+        text = staged.read_text()
+        edits = [
+            (
+                """        prepared_image = image
+        prepared_images: list = []
+        if task == "fl2va" and image is not None:
+            prepared_images = [item.resize((width, height), Image.Resampling.LANCZOS) for item in images]
+        elif task == "ref2va" and image is not None:
+            ref_width, ref_height = _reference_image_shape(image)
+            prepared_image = image.resize(
+                (ref_width, ref_height),
+                Image.Resampling.LANCZOS,
+            )
+""",
+                """        prepared_image = None
+        prepared_images: list = []
+        if task == "fl2va" and image is not None:
+            prepared_images = [item.resize((width, height), Image.Resampling.LANCZOS) for item in images]
+        elif task == "ref2va" and image is not None:
+            for item in images:
+                ref_width, ref_height = _reference_image_shape(item)
+                prepared_images.append(item.resize((ref_width, ref_height), Image.Resampling.LANCZOS))
+""",
+            ),
+            (
+                """            text_embeddings, text_tags = self.encode_prompt(
+                task=task,
+                prompt=prompt,
+                image=prepared_images if task == "fl2va" else prepared_image,
+                prepared_videos=prepared_videos,
+                has_ref_audio=task == "ref2va" and multi_modal_data.get("audio") is not None,
+            )
+""",
+                """            text_embeddings, text_tags = self.encode_prompt(
+                task=task,
+                prompt=prompt,
+                image=prepared_images if task in ("fl2va", "ref2va") else prepared_image,
+                prepared_videos=prepared_videos,
+                has_ref_audio=task == "ref2va" and multi_modal_data.get("audio") is not None,
+            )
+""",
+            ),
+            (
+                """                else:
+                    condition_labels = [("image", 1)] + ([("audio", 1)] if has_ref_audio else [])
+                    ids, tags = minimax_h3_ref2va_presentation(
+                        self.tokenizer,
+                        prompt=prompt,
+                        condition_labels=condition_labels,
+                        image_token_count=image_token_counts[0],
+                    )
+""",
+                """                else:
+                    condition_labels = [("image", index) for index in range(1, len(prompt_images) + 1)]
+                    if has_ref_audio:
+                        condition_labels.append(("audio", 1))
+                    ids, tags = minimax_h3_ref2va_presentation(
+                        self.tokenizer,
+                        prompt=prompt,
+                        condition_labels=condition_labels,
+                        image_token_count=image_token_counts,
+                    )
+""",
+            ),
+            (
+                """        if task == "ref2va":
+            if ref_blocks is None:
+                if visual_condition_shape is None:
+                    raise ValueError("ref2va condition metadata is missing")
+                _, ref_h, ref_w = visual_condition_shape
+                ref_blocks = [{"kind": "image", "latent_h": ref_h, "latent_w": ref_w}]
+                if ref_audio_t is not None:
+                    ref_blocks.append({"kind": "audio", "ref_audio_t": ref_audio_t})
+""",
+                """        if task == "ref2va":
+            if ref_blocks is None:
+                shapes = visual_condition_shapes
+                if shapes is None and visual_condition_shape is not None:
+                    shapes = [visual_condition_shape]
+                if not shapes:
+                    raise ValueError("ref2va condition metadata is missing")
+                ref_blocks = [
+                    {"kind": "image", "latent_h": int(shape[1]), "latent_w": int(shape[2])}
+                    for shape in shapes
+                ]
+                if ref_audio_t is not None:
+                    ref_blocks.append({"kind": "audio", "ref_audio_t": ref_audio_t})
+""",
+            ),
+        ]
+        patched_text = apply_edits(name, text, edits)
+        install_file(name, patched_text, cpath)
+        print("PHASE4FIX COMPLETE")
+    elif len(sys.argv) > 1 and sys.argv[1] == "phase3":
         # Image-only Ref2VA: the official input matrix allows reference images
         # without audio (audio-only is what gets rejected). Older vllm-omni
         # builds hard-require audio for image Ref2VA; relax it while keeping

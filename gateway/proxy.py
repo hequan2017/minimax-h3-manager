@@ -264,10 +264,13 @@ async def build_form(payload:dict):
         assert_safe_reference_url(url)
         form["image_reference"]=json.dumps({"image_url":url},separators=(",",":"))
     if refs:
-        url=item_url(refs[0],"image_url")
-        if not url: raise ValueError("reference_image image_url.url is required")
-        assert_safe_reference_url(url)
-        form["image_reference"]=json.dumps({"image_url":url},separators=(",",":"))
+        if len(refs)>4:
+            raise ValueError("at most 4 reference_image items are supported")
+        for index,item in enumerate(refs):
+            url=item_url(item,"image_url")
+            if not url: raise ValueError("reference_image image_url.url is required")
+            data=await fetch_media(url)
+            keyframe_files.append(("input_references",(f"reference_{index}.png",data,"application/octet-stream")))
     if videos:
         urls=[]
         for x in videos:

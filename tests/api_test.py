@@ -210,6 +210,11 @@ def main() -> None:
         {"type": "image_url", "image_url": {"url": data_url(OUT / "fl2va-input.png", "image/png")}, "role": "reference_image"},
         {"type": "audio_url", "audio_url": {"url": data_url(OUT / "ref-audio.mp3", "audio/mpeg")}, "role": "reference_audio"},
     ])
+    sync_case("sync 多图参考生成（2 张参考图）", [
+        {"type": "text", "text": "两个参考主体同框自然互动。"},
+        {"type": "image_url", "image_url": {"url": data_url(OUT / "first-frame.png", "image/png")}, "role": "reference_image"},
+        {"type": "image_url", "image_url": {"url": data_url(OUT / "last-frame.png", "image/png")}, "role": "reference_image"},
+    ])
 
     # -- create + delete ------------------------------------------------------
     status, _, payload = request("POST", "/v1/videos", body={"model": "MiniMax-H3", "content": [
