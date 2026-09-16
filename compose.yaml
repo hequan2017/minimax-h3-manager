@@ -1,0 +1,170 @@
+services:
+  h3-fl2va:
+    image: ${H3_IMAGE:-vllm/vllm-omni:minimax-h3}
+    container_name: minimax-h3-fl2va
+    restart: unless-stopped
+    runtime: nvidia
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["0", "1", "2", "3"]
+              capabilities: [gpu]
+    ipc: host
+    shm_size: "64gb"
+    env_file: [.env]
+    environment:
+      NVIDIA_VISIBLE_DEVICES: "0,1,2,3"
+      VLLM_API_KEY: "${H3_API_KEY}"
+      VLLM_WORKER_MULTIPROC_METHOD: spawn
+      VLLM_OMNI_VIDEO_SYNC_TIMEOUT: "14400"
+      HF_HUB_OFFLINE: "1"
+      TRANSFORMERS_OFFLINE: "1"
+    ports: ["127.0.0.1:8091:8091"]
+    volumes:
+      - ${H3_MODEL_DIR:-/data2/MiniMax-H3}:/models/MiniMax-H3:ro
+      - ./outputs:/outputs
+      - ./cache/fl2va:/root/.cache
+    ulimits:
+      memlock: {soft: -1, hard: -1}
+      stack: 67108864
+    command:
+      - vllm
+      - serve
+      - /models/MiniMax-H3/FL2VA
+      - --omni
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8091"
+      - --trust-remote-code
+      - --served-model-name
+      - MiniMax-H3-FL2VA
+      - --num-gpus
+      - "4"
+      - --tensor-parallel-size
+      - "4"
+      - --usp
+      - "1"
+      - --ring
+      - "1"
+      - --text-encoder-tp-size
+      - "4"
+      - --vae-patch-parallel-size
+      - "1"
+      - --vae-parallel-mode
+      - tile
+      - --vae-use-tiling
+      - --enable-layerwise-offload
+      - --enforce-eager
+      - --diffusion-attention-backend
+      - CUDNN_ATTN
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS -H \"Authorization: Bearer $$H3_API_KEY\" http://127.0.0.1:8091/health >/dev/null"]
+      interval: 30s
+      timeout: 10s
+      retries: 120
+      start_period: 30m
+
+  h3-ref2va:
+    image: ${H3_IMAGE:-vllm/vllm-omni:minimax-h3}
+    container_name: minimax-h3-ref2va
+    restart: unless-stopped
+    runtime: nvidia
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["4", "5"]
+              capabilities: [gpu]
+    ipc: host
+    shm_size: "64gb"
+    env_file: [.env]
+    environment:
+      NVIDIA_VISIBLE_DEVICES: "4,5"
+      VLLM_API_KEY: "${H3_API_KEY}"
+      VLLM_WORKER_MULTIPROC_METHOD: spawn
+      VLLM_OMNI_VIDEO_SYNC_TIMEOUT: "14400"
+      HF_HUB_OFFLINE: "1"
+      TRANSFORMERS_OFFLINE: "1"
+    ports: ["127.0.0.1:8092:8091"]
+    volumes:
+      - ${H3_MODEL_DIR:-/data2/MiniMax-H3}:/models/MiniMax-H3:ro
+      - ./outputs:/outputs
+      - ./cache/ref2va:/root/.cache
+    ulimits:
+      memlock: {soft: -1, hard: -1}
+      stack: 67108864
+    command:
+      - vllm
+      - serve
+      - /models/MiniMax-H3/Ref2VA
+      - --omni
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8091"
+      - --trust-remote-code
+      - --served-model-name
+      - MiniMax-H3-Ref2VA
+      - --num-gpus
+      - "2"
+      - --tensor-parallel-size
+      - "2"
+      - --usp
+      - "1"
+      - --ring
+      - "1"
+      - --text-encoder-tp-size
+      - "2"
+      - --vae-patch-parallel-size
+      - "1"
+      - --vae-parallel-mode
+      - tile
+      - --vae-use-tiling
+      - --enable-layerwise-offload
+      - --enforce-eager
+      - --diffusion-attention-backend
+      - CUDNN_ATTN
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS -H \"Authorization: Bearer $$H3_API_KEY\" http://127.0.0.1:8091/health >/dev/null"]
+      interval: 30s
+      timeout: 10s
+      retries: 120
+      start_period: 30m
+
+  h3-gateway:
+    image: ${H3_IMAGE:-vllm/vllm-omni:minimax-h3}
+    container_name: minimax-h3-gateway
+    restart: unless-stopped
+    depends_on:
+      h3-fl2va:
+        condition: service_healthy
+      h3-ref2va:
+        condition: service_healthy
+    ports:
+      - "0.0.0.0:8090:8090"
+    volumes:
+      - ./proxy:/app/docs:ro
+      - ./gateway_data:/app/data
+    command:
+      - python3
+      - -m
+      - uvicorn
+      - proxy:app
+      - --app-dir
+      - /app/docs
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8090"
+      - --workers
+      - "1"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8090/health >/dev/null"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 20s

@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>MiniMax H3 Manager — 自建 GPU 视频生成统一服务</title>
+<style>
+:root{--bg:#0b1020;--card:#121936;--line:#232c54;--text:#e8ebf7;--muted:#9aa4c7;--primary:#6c5cff;--primary2:#8b7cff;--ok:#2ad3a1}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px/1.7 Inter,"Segoe UI","Microsoft YaHei",system-ui,sans-serif}
+a{color:var(--primary2)}
+.hero{padding:72px 24px 56px;text-align:center;background:radial-gradient(1200px 500px at 50% -10%,#2a356e 0%,transparent 60%),var(--bg)}
+.hero h1{font-size:40px;margin:0 0 12px;background:linear-gradient(90deg,#fff,#b9c1ff);-webkit-background-clip:text;background-clip:text;color:transparent}
+.hero p.sub{color:var(--muted);font-size:17px;max-width:820px;margin:0 auto}
+.badges{margin-top:22px}.badge{display:inline-block;border:1px solid var(--line);background:var(--card);border-radius:999px;padding:6px 14px;margin:4px;font-size:13px;color:var(--muted)}
+.wrap{max-width:1080px;margin:0 auto;padding:0 24px}
+section{padding:36px 0}
+h2{font-size:26px;border-left:4px solid var(--primary);padding-left:14px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px;margin-top:20px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px}
+.card h3{margin:0 0 8px;font-size:16px;color:#fff}.card p{margin:0;color:var(--muted);font-size:14px}
+table{width:100%;border-collapse:collapse;margin-top:16px;font-size:14px}
+th,td{padding:10px 12px;border:1px solid var(--line);text-align:left}
+th{background:var(--card)}
+code,pre{font-family:ui-monospace,Consolas,monospace}
+code{background:#1a2142;border-radius:5px;padding:2px 6px;font-size:13px}
+pre{background:#0d1330;border:1px solid var(--line);border-radius:12px;padding:16px;overflow:auto;font-size:13px;line-height:1.6}
+.shot{width:100%;border-radius:14px;border:1px solid var(--line);box-shadow:0 12px 40px rgba(0,0,0,.45);transition:transform .25s}
+.shot:hover{transform:translateY(-4px)}
+.shots{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:20px}
+@media(max-width:860px){.shots{grid-template-columns:1fr}.hero h1{font-size:30px}}
+footer{text-align:center;color:var(--muted);font-size:13px;padding:40px 0;border-top:1px solid var(--line);margin-top:40px}
+</style>
+</head>
+<body>
+<div class="hero">
+  <h1>MiniMax H3 Manager</h1>
+  <p class="sub">自建 GPU 服务器上的 MiniMax-H3 视频生成统一服务 —— Docker Compose 双后端编排、统一 API 网关、中文 Web 控制台，以及解锁首尾帧图生视频与纯图片参考的推理管线补丁。</p>
+  <div class="badges">
+    <span class="badge">33B 全模态视频+音频生成</span>
+    <span class="badge">480P / 720P · 4–15 秒 · 24FPS</span>
+    <span class="badge">6 种生成模式</span>
+    <span class="badge">任务历史持久化</span>
+    <span class="badge">Apache-2.0</span>
+  </div>
+</div>
+
+<div class="wrap">
+<section>
+  <h2>它解决什么问题</h2>
+  <div class="grid">
+    <div class="card"><h3>一个入口，两种后端</h3><p>FL2VA（文生/首尾帧图生）与 Ref2VA（参考生成）分占不同 GPU，网关按请求内容自动路由，对外只暴露一个模型名和一个端口。</p></div>
+    <div class="card"><h3>解锁官方未开放的组合</h3><p>推理补丁启用尾帧、首尾帧关键帧锚定与纯图片参考生成 —— 能力在模型与底层布局里本就存在，只差胶水层。</p></div>
+    <div class="card"><h3>历史不丢</h3><p>任务元数据存 SQLite 文件数据库，视频文件落盘；网关重启后历史依然可查、可播、可下载。</p></div>
+    <div class="card"><h3>开箱即用的中文控制台</h3><p>表单创建、实时等待计时、自动刷新、取消/删除、浏览器记住密钥，内置完整中文 API 文档。</p></div>
+  </div>
+</section>
+
+<section>
+  <h2>支持的生成模式</h2>
+  <table>
+    <tr><th>模式</th><th>输入</th><th>效果</th></tr>
+    <tr><td>文生视频 t2va</td><td>提示词</td><td>文生视频 + 同步音轨，需指定比例</td></tr>
+    <tr><td>首帧图生视频</td><td>提示词 + 首帧图</td><td>从给定首帧自然展开</td></tr>
+    <tr><td>尾帧图生视频</td><td>提示词 + 尾帧图</td><td>画面自然落到给定结尾帧</td></tr>
+    <tr><td>首尾帧图生视频</td><td>首帧 + 尾帧</td><td>两帧之间平滑插值过渡</td></tr>
+    <tr><td>图片参考生成</td><td>参考图（音频可选）</td><td>主体一致性；搭配音频可指定音色</td></tr>
+    <tr><td>视频参考生成</td><td>参考视频</td><td>使用源视频音轨驱动运动与声音</td></tr>
+  </table>
+</section>
+
+<section>
+  <h2>控制台截图</h2>
+  <div class="shots">
+    <div><img class="shot" src="img/screenshot-create.png" alt="创建任务页"><p style="color:var(--muted);font-size:13px;text-align:center">创建任务：六种模式、分辨率/比例/时长/步数/种子</p></div>
+    <div><img class="shot" src="img/screenshot-history.png" alt="任务历史页"><p style="color:var(--muted);font-size:13px;text-align:center">任务历史：类型、参数、提示词、耗时、播放/删除</p></div>
+  </div>
+</section>
+
+<section>
+  <h2>快速开始</h2>
+<pre>$ cp .env.example .env        # 设置 H3_API_KEY 与 H3_MODEL_DIR
+$ cd patches && docker build -t vllm/vllm-omni:minimax-h3 .   # 构建含补丁的推理镜像
+$ ./manage.sh start           # 启动 fl2va / ref2va / gateway 三服务
+$ ./manage.sh status          # 等待后端 healthy
+$ python3 tests/api_test.py   # 29 项接口测试 + Markdown 报告</pre>
+<pre style="margin-top:14px">$ curl -X POST "http://localhost:8090/v1/videos" \
+    -H "Authorization: Bearer $H3_API_KEY" \
+    -H "Content-Type: application/json" \
+    -d '{"model":"MiniMax-H3",
+         "content":[{"type":"text","text":"一只橘猫在草原上奔跑。"}],
+         "resolution":"768P","duration":5,"ratio":"16:9"}'
+{"id":"h3_...","status":"queued",...}          # 轮询 GET /v1/videos/{id}，完成后下载 /content</pre>
+</section>
+
+<section>
+  <h2>统一 API</h2>
+  <table>
+    <tr><th>方法</th><th>路径</th><th>说明</th></tr>
+    <tr><td>POST</td><td><code>/v1/videos</code></td><td>创建异步任务，返回任务 ID</td></tr>
+    <tr><td>GET</td><td><code>/v1/videos/{id}</code></td><td>查询状态与元数据（类型/提示词/参数）</td></tr>
+    <tr><td>GET</td><td><code>/v1/videos/{id}/content</code></td><td>下载生成的 MP4</td></tr>
+    <tr><td>DELETE</td><td><code>/v1/videos/{id}</code></td><td>取消进行中任务 / 删除记录与文件</td></tr>
+    <tr><td>POST</td><td><code>/v1/videos/sync</code></td><td>同步生成，直接返回 MP4</td></tr>
+    <tr><td>GET</td><td><code>/health</code></td><td>双后端健康聚合</td></tr>
+  </table>
+</section>
+
+<section>
+  <h2>架构</h2>
+  <pre>                        ┌──────────────────────────────┐
+   浏览器 / 客户端  ───▶ │  Gateway :8090  (FastAPI)    │
+                        │  · 路由 / 鉴权 / 异步任务      │
+                        │  · SQLite 持久化 + 视频落盘    │
+                        │  · SSRF 防护 / 中文控制台      │
+                        └──────────┬─────────┬─────────┘
+                                   │         │
+                    ┌──────────────▼──┐   ┌──▼──────────────┐
+                    │ h3-fl2va :8091  │   │ h3-ref2va :8092 │
+                    │ GPU 0–3         │   │ GPU 4–5         │
+                    │ t2va / fl2va    │   │ ref2va          │
+                    └─────────────────┘   └─────────────────┘</pre>
+</section>
+
+<section>
+  <h2>安全与限制</h2>
+  <div class="grid">
+    <div class="card"><h3>密钥</h3><p>服务端 .env（600 权限）；浏览器端仅可选保存在本机 localStorage。8090 为明文 HTTP，请只在可信网络暴露。</p></div>
+    <div class="card"><h3>SSRF 防护</h3><p>参考素材 URL 仅接受 data URL 与公网 http(s)；内网、环回、保留地址一律拒绝。</p></div>
+    <div class="card"><h3>资源要求</h3><p>默认 6×GPU（L40 实测配置，可在 compose 调整）；建议主机内存 ≥384GB 用于层级卸载。</p></div>
+    <div class="card"><h3>已知限制</h3><p>2K 未启用；推理步数默认 50；vllm-omni 路径参考矩阵为 1 图（+1 音频）/ 多视频。</p></div>
+  </div>
+</section>
+
+<footer>MiniMax H3 Manager · Apache-2.0 · 模型权重版权归 MiniMax 所有，商用请确认官方条款</footer>
+</div>
+</body>
+</html>
